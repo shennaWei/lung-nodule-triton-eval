@@ -1,0 +1,54 @@
+# Stage 1: 3D nodule detector (MONAI SwinUNETR).
+# Predicts a binary nodule mask plus a Gaussian centre heatmap on 96^3 patches
+# sampled at 1 mm isotropic spacing.
+run_name: stage1_swinunetr_96
+seed: 42
+deterministic: true
+device: cuda
+
+data:
+  preprocessed_dir: data/preprocessed/luna16_1mm
+  annotations: data/raw/luna16/annotations/annotations.csv
+  split_file: configs/splits/luna16_fold0.json
+  patch_size: [96, 96, 96]
+  pos_samples: 2
+  neg_samples: 1
+  num_samples: 2          # patches per scan per epoch
+  cache_rate: 0.0
+  num_workers: 8
+  batch_size: 2
+  val_batch_size: 1
+
+model:
+  name: swinunetr
+  in_channels: 1
+  out_channels: 2         # channel 0: nodule mask, channel 1: centre heatmap
+  feature_size: 48
+  use_checkpoint: true
+  drop_rate: 0.0
+  attn_drop_rate: 0.0
+  dropout_path_rate: 0.1
+  spatial_dims: 3
+
+loss:
+  mask_weight: 1.0
+  center_weight: 0.5
+  dice_weight: 0.5        # DiceCELoss: weighted sum of Dice and CE
+  ce_weight: 1.0
+  center_pos_weight: 5.0  # compensates the extreme foreground/background ratio
+
+optim:
+  lr: 2.0e-4
+  weight_decay: 1.0e-5
+  epochs: 150
+  warmup_epochs: 5
+  grad_clip: 1.0
+  amp: true
+
+runtime:
+  checkpoint_dir: checkpoints
+  checkpoint_name: stage1_best.pt
+  log_dir: runs/stage1
+  metrics_file: artifacts/stage1/metrics.jsonl
+  save_every: 10
+  log_every: 20

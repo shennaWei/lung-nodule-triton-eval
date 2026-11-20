@@ -1,0 +1,265 @@
+name: froc-regression
+
+# Automated FROC/CPM regression tracking.
+#
+# 1. `predict`  (self-hosted GPU runner) exports ONNX, boots Triton, runs the
+#    validation split and uploads predictions.
+# 2. `gate`     (CPU runner) computes FROC, compares against
+#    eval/baselines/luna16_fold0.json, posts a PR comment and fails the check on
+#    a regression.
+# 3. `track`    appends the run to the history artifact that feeds the
+#    leaderboard.
+#
+# Enable the gate on a PR by adding the `froc` label (full inference is too
+# expensive to run for every push), or trigger it manually from the Actions tab.
+
+on:
+  workflow_dispatch:
+    inputs:
+      backend:
+        description: Inference backend
+        type: choice
+        default: triton
+        options: [triton, torch]
+      update_baseline:
+        description: Promote the fresh metrics to the baseline
+        type: boolean
+        default: false
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+    paths:
+      - "src/lung_nodule/models/**"
+      - "src/lung_nodule/inference/**"
+      - "src/lung_nodule/deploy/**"
+      - "deploy/**"
+      - "configs/**"
+      - "eval/baselines/**"
+  schedule:
+    - cron: "0 3 * * 1"   # weekly drift check
+
+concurrency:
+  group: froc-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+env:
+  BASELINE: eval/baselines/luna16_fold0.json
+  IMAGES_DIR: data/raw/luna16/subset0
+  ANN: data/raw/luna16/annotations/annotations.csv
+  SPLIT: configs/splits/luna16_fold0.json
+
+jobs:
+  predict:
+    name: inference (stage1+2 via Triton)
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'schedule' ||
+      (github.event_name == 'pull_request' &&
+       contains(github.event.pull_request.labels.*.name, 'froc'))
+    runs-on: [self-hosted, linux, gpu]
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install client
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+
+      - name: Export ONNX graphs
+        run: |
+          python -m lung_nodule.deploy.export_onnx \
+            --config configs/pipeline.yaml \
+            --stage1-checkpoint checkpoints/stage1_best.pt \
+            --stage2-checkpoint checkpoints/stage2_best.pt \
+            --model-repository deploy/triton/model_repository
+
+      - name: Start Triton
+        run: |
+          docker compose -f deploy/triton/docker-compose.yaml up -d
+          for attempt in $(seq 1 60); do
+            if curl -fsS http://localhost:8000/v2/health/ready; then
+              echo "triton ready after ${attempt} attempts"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "triton did not become ready" >&2
+          docker compose -f deploy/triton/docker-compose.yaml logs --tail 200 triton >&2
+          exit 1
+
+      - name: Smoke test both models
+        run: python scripts/triton_smoke_test.py --url localhost:8001 --repeat 2
+
+      - name: Predict validation split
+        run: |
+          if [ "${{ github.event.inputs.backend || 'triton' }}" = "torch" ]; then
+            python -m lung_nodule.inference.pipeline \
+              --config configs/pipeline.yaml --images-dir "$IMAGES_DIR" \
+              --split "$SPLIT" --split-key val \
+              --output artifacts/predictions/val.csv --resume
+          else
+            python -m lung_nodule.deploy.infer_triton \
+              --config configs/triton_client.yaml --pipeline-config configs/pipeline.yaml \
+              --images-dir "$IMAGES_DIR" --split "$SPLIT" --split-key val \
+              --output artifacts/predictions/val.csv --workers 2 --metrics
+          fi
+
+      - name: Upload predictions
+        uses: actions/upload-artifact@v4
+        with:
+          name: val-predictions
+          path: artifacts/predictions/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload export report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: onnx-export-report
+          path: artifacts/export/
+          if-no-files-found: warn
+
+      - name: Triton logs
+        if: always()
+        run: docker compose -f deploy/triton/docker-compose.yaml logs --tail 500 triton > artifacts/triton.log || true
+
+      - name: Stop Triton
+        if: always()
+        run: docker compose -f deploy/triton/docker-compose.yaml down
+
+  gate:
+    name: FROC gate
+    needs: predict
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install evaluation dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install numpy pandas scipy PyYAML
+          pip install -e . --no-deps
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: val-predictions
+          path: artifacts/predictions
+
+      - name: Compute FROC
+        run: |
+          python -m lung_nodule.eval.froc \
+            --predictions artifacts/predictions/val.csv \
+            --annotations "$ANN" \
+            --output-dir artifacts/froc --name report \
+            --bootstrap --n-boot 200 --plot
+
+      - name: Regression gate
+        id: regression
+        run: |
+          python -m lung_nodule.eval.regression \
+            --report artifacts/froc/report.json \
+            --baseline "$BASELINE" \
+            --output-dir artifacts/froc \
+            --name regression \
+            --summary
+
+      - name: Append to run history
+        if: always()
+        run: |
+          python -m lung_nodule.eval.tracking --append \
+            --report artifacts/froc/report.json \
+            --history artifacts/froc/history.jsonl \
+            --backend "${{ github.event.inputs.backend || 'triton' }}" \
+            --dataset luna16-fold0-val \
+            --tag pr="${{ github.event.pull_request.number || '' }}"
+          python -m lung_nodule.eval.tracking \
+            --history artifacts/froc/history.jsonl \
+            --output artifacts/froc/LEADERBOARD.md
+
+      - name: Upload FROC artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: froc-report
+          path: artifacts/froc/
+          retention-days: 30
+
+      - name: Comment on pull request
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const path = 'artifacts/froc/regression.md';
+            if (!fs.existsSync(path)) {
+              core.warning('regression report missing');
+              return;
+            }
+            const body = fs.readFileSync(path, 'utf8');
+            const marker = '<!-- froc-regression -->';
+            const payload = `${marker}\n${body}`;
+            const { owner, repo } = context.repo;
+            const issue_number = context.payload.pull_request.number;
+            const comments = await github.rest.issues.listComments({ owner, repo, issue_number, per_page: 100 });
+            const previous = comments.data.find((comment) => comment.body && comment.body.includes(marker));
+            if (previous) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: previous.id, body: payload });
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number, body: payload });
+            }
+
+  publish-baseline:
+    name: promote baseline
+    needs: gate
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.update_baseline == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: froc-report
+          path: artifacts/froc
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Update baseline
+        run: |
+          python -m pip install --upgrade pip
+          pip install numpy pandas scipy PyYAML
+          pip install -e . --no-deps
+          python -m lung_nodule.eval.regression \
+            --report artifacts/froc/report.json \
+            --baseline "$BASELINE" \
+            --output-dir artifacts/froc \
+            --update-baseline
+
+      - name: Commit
+        run: |
+          git config user.name "froc-bot"
+          git config user.email "froc-bot@users.noreply.github.com"
+          git add "$BASELINE"
+          git commit -m "chore(froc): promote baseline from run ${{ github.run_id }}" || echo "nothing to commit"
+          git push

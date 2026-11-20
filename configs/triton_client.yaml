@@ -1,0 +1,31 @@
+# Triton Inference Server client configuration.
+# The post-processing / candidate parameters live in configs/pipeline.yaml and
+# are loaded together with this file by lung_nodule.deploy.infer_triton.
+url: localhost:8001
+protocol: grpc
+client_timeout_s: 180
+workers: 4                # concurrent scans (thread-local gRPC clients)
+
+stage1:
+  model_name: stage1_swinunetr
+  input_name: image
+  output_names: [mask_logits, center_logits]
+  patch_size: [96, 96, 96]
+  overlap: 0.5
+  max_batch: 4
+
+stage2:
+  model_name: stage2_fp_reducer
+  input_name: crop
+  output_names: [logit, diameter]
+  crop_size: [48, 48, 48]
+  max_batch: 32
+
+retry:
+  attempts: 3
+  backoff_s: 1.5
+
+metrics:
+  # Triton exposes Prometheus metrics on :8002 for throughput/latency tracking.
+  enabled: true
+  url: localhost:8002

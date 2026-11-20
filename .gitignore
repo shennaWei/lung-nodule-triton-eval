@@ -1,0 +1,56 @@
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+.env
+.python-version
+
+# ---- Tooling caches ----
+.ruff_cache/
+.mypy_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# ---- Data (never commit medical images) ----
+# Root-anchored on purpose: a bare "data/" would also ignore src/lung_nodule/data/.
+/data/*
+!/data/README.md
+*.mhd
+*.raw
+*.nii
+*.nii.gz
+*.npz
+*.npy
+*.dcm
+
+# ---- Model weights / exported graphs ----
+checkpoints/
+weights/
+*.pt
+*.pth
+*.ckpt
+*.onnx
+*.engine
+*.plan
+deploy/triton/model_repository/*/1/*
+!deploy/triton/model_repository/*/1/.gitkeep
+
+# ---- Run artifacts ----
+artifacts/
+runs/
+logs/
+wandb/
+mlruns/
+*.log
+
+# ---- Editors / OS ----
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

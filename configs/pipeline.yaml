@@ -1,0 +1,58 @@
+# End-to-end pipeline configuration shared by the local PyTorch runner,
+# the ONNX exporter and the Triton client.
+stage1:
+  checkpoint: checkpoints/stage1_best.pt
+  patch_size: [96, 96, 96]
+  sw_batch_size: 4
+  overlap: 0.5
+  amp: true
+  model:
+    name: swinunetr
+    in_channels: 1
+    out_channels: 2
+    feature_size: 48
+    use_checkpoint: false
+    drop_rate: 0.0
+    attn_drop_rate: 0.0
+    dropout_path_rate: 0.0
+    spatial_dims: 3
+
+stage2:
+  checkpoint: checkpoints/stage2_best.pt
+  crop_size: [48, 48, 48]
+  batch_size: 64
+  use_mask_channel: true
+  model:
+    name: resnet3d
+    arch: resnet18
+    in_channels: 2
+    num_classes: 1
+    dropout: 0.0
+    predict_diameter: true
+
+candidates:
+  heatmap_threshold: 0.35
+  peak_window: 5            # local-maximum window (voxels)
+  score_mode: heatmap_x_mask
+  mask_threshold: 0.5
+  mask_radius_vox: 8        # neighbourhood used to estimate the diameter
+  nms_distance_mm: 5.0
+  max_candidates_per_scan: 64
+  min_diameter_mm: 3.0
+  max_diameter_mm: 40.0
+
+combine:
+  mode: multiply            # multiply | stage2_only | mean
+  stage2_floor: 1.0e-3      # avoids hard zeros when the FP reducer is confident
+
+eval:
+  fps: [0.125, 0.25, 0.5, 1, 2, 4, 8]
+  radius_scale: 0.5         # LUNA16 criterion: prediction centre inside the nodule sphere
+  min_radius_mm: 0.0
+
+onnx:
+  opset: 17
+  stage1_batch: 4
+  stage2_batch: 32
+  fp16: false
+  verify: true

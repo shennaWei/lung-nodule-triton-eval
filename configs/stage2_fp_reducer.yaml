@@ -1,0 +1,50 @@
+# Stage 2: 3D ResNet false-positive reducer.
+# Consumes 48^3 crops around stage-1 candidates (image + optionally the stage-1
+# mask channel) and predicts "is a real nodule" plus a diameter regression.
+run_name: stage2_fp_reducer
+seed: 42
+deterministic: true
+device: cuda
+
+data:
+  preprocessed_dir: data/preprocessed/luna16_1mm
+  annotations: data/raw/luna16/annotations/annotations.csv
+  candidates: data/raw/luna16/annotations/candidates.csv
+  split_file: configs/splits/luna16_fold0.json
+  hard_negatives: artifacts/stage1/hard_negatives.json
+  hard_negatives_per_scan: 20
+  crop_size: [48, 48, 48]
+  use_mask_channel: true
+  num_workers: 8
+  batch_size: 64
+  val_batch_size: 128
+  augment: true
+
+model:
+  name: resnet3d
+  arch: resnet18
+  in_channels: 2          # image + stage-1 mask probability
+  num_classes: 1
+  dropout: 0.1
+  predict_diameter: true
+
+loss:
+  bce_weight: 1.0
+  diameter_weight: 0.1
+  pos_weight: 1.0
+
+optim:
+  lr: 3.0e-4
+  weight_decay: 1.0e-4
+  epochs: 60
+  warmup_epochs: 3
+  grad_clip: 1.0
+  amp: true
+
+runtime:
+  checkpoint_dir: checkpoints
+  checkpoint_name: stage2_best.pt
+  log_dir: runs/stage2
+  metrics_file: artifacts/stage2/metrics.jsonl
+  save_every: 10
+  log_every: 50

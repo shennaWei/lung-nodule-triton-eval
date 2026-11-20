@@ -1,0 +1,2 @@
+# Keep the empty version directories in git so the repository shape is obvious;
+# the actual model.onnx files are produced by `make export`.

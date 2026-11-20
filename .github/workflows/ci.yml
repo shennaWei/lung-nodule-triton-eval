@@ -1,0 +1,61 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: ruff
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: python -m pip install --upgrade pip
+      - run: pip install ruff==0.6.9
+      - run: ruff check src scripts
+      - run: ruff format --check src scripts
+
+  package:
+    name: package / compile
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      # The heavy ML dependencies are not needed to validate packaging, so the
+      # package is installed without them and the tree is byte-compiled instead.
+      - run: python -m pip install --upgrade pip
+      - run: pip install -e . --no-deps
+      - run: python -m compileall -q src scripts
+      - run: python -c "import lung_nodule; print('lung_nodule', lung_nodule.__version__)"
+
+  eval-cli:
+    name: evaluation CLIs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: python -m pip install --upgrade pip
+      - run: pip install numpy pandas scipy PyYAML
+      - run: pip install -e . --no-deps
+      # Cheap structural check that the FROC toolchain imports and parses.
+      - run: python -m lung_nodule.eval.froc --help > /dev/null
+      - run: python -m lung_nodule.eval.regression --help > /dev/null
+      - run: python -m lung_nodule.eval.tracking --help > /dev/null
+      - run: python -c "from lung_nodule.eval import compute_froc; print('froc import ok')"

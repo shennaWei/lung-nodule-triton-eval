@@ -1,0 +1,40 @@
+services:
+  triton:
+    image: nvcr.io/nvidia/tritonserver:24.08-py3
+    container_name: lung-nodule-triton
+    command: >
+      tritonserver
+      --model-repository=/models
+      --strict-model-config=true
+      --model-control-mode=poll
+      --repository-poll-secs=10
+      --http-port=8000
+      --grpc-port=8001
+      --metrics-port=8002
+      --log-info=true
+    ports:
+      - "8000:8000"   # HTTP / KServe
+      - "8001:8001"   # gRPC (used by tritonclient)
+      - "8002:8002"   # Prometheus metrics
+    volumes:
+      - ./model_repository:/models:ro
+    shm_size: "2gb"
+    ulimits:
+      memlock: -1
+      stack: 67108864
+    environment:
+      - CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-0}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/v2/health/ready"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    restart: unless-stopped

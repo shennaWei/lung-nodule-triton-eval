@@ -1,0 +1,66 @@
+# Stage-1 detector (MONAI SwinUNETR, 96^3 patches, ONNX Runtime backend).
+#
+# Batch is dynamic (max_batch_size); spatial dims are fixed because the Swin
+# window partition reshapes are static. Full volumes are tiled client-side into
+# 96^3 windows by the MONAI sliding-window scheduler.
+name: "stage1_swinunetr"
+platform: "onnxruntime_onnx"
+max_batch_size: 4
+default_model_filename: "model.onnx"
+
+input [
+  {
+    name: "image"
+    data_type: TYPE_FP32
+    dims: [ 1, 96, 96, 96 ]
+  }
+]
+
+output [
+  {
+    name: "mask_logits"
+    data_type: TYPE_FP32
+    dims: [ 1, 96, 96, 96 ]
+  },
+  {
+    name: "center_logits"
+    data_type: TYPE_FP32
+    dims: [ 1, 96, 96, 96 ]
+  }
+]
+
+instance_group [
+  {
+    kind: KIND_GPU
+    count: 1
+  }
+]
+
+dynamic_batching {
+  preferred_batch_size: [ 1, 2, 4 ]
+  max_queue_delay_microseconds: 2000
+}
+
+parameters [
+  { key: "cudnn_conv_algo_search" value: { string_value: "EXHAUSTIVE" } },
+  { key: "intra_op_thread_count" value: { string_value: "1" } }
+]
+
+version_policy {
+  latest {
+    num_versions: 1
+  }
+}
+
+# Enable TensorRT EP for extra throughput once the graph is verified on your GPU:
+# optimization {
+#   execution_accelerators {
+#     gpu_execution_accelerator [
+#       {
+#         name: "tensorrt"
+#         parameters { key: "precision_mode" value: "FP16" }
+#         parameters { key: "max_workspace_size_bytes" value: "2147483648" }
+#       }
+#     ]
+#   }
+# }

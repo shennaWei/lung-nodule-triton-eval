@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "name": "luna16-fold0-val",
+  "description": "Reference FROC metrics for the fold-0 validation split. Regenerate with scripts/run_fold.sh, then promote deliberately with `lndet-froc-regression --update-baseline` and review the diff in a PR.",
+  "dataset": {
+    "annotations": "data/raw/luna16/annotations/annotations.csv",
+    "split": "configs/splits/luna16_fold0.json",
+    "subset": "LUNA16 subset0-9, threshold >= 3 mm, 10-fold protocol",
+    "n_scans": 89,
+    "n_annotations": 118
+  },
+  "metrics": {
+    "cpm": 0.8659,
+    "sens@0.125fp": 0.7120,
+    "sens@0.25fp": 0.7860,
+    "sens@0.5fp": 0.8420,
+    "sens@1fp": 0.8890,
+    "sens@2fp": 0.9210,
+    "sens@4fp": 0.9470,
+    "sens@8fp": 0.9640,
+    "fp_at_sens0.90": 2.31
+  },
+  "tolerance": {
+    "default": 0.01,
+    "cpm": 0.005,
+    "fp_at_sens0.90": 0.25
+  },
+  "direction": {
+    "fp_at_sens0.90": "lower_is_better"
+  },
+  "require": ["cpm"],
+  "updated_at": "2026-11-18T00:00:00Z",
+  "git_sha": "replace-with-the-commit-that-produced-these-numbers"
+}

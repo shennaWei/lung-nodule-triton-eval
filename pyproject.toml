@@ -1,0 +1,89 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lung-nodule-triton-eval"
+version = "0.3.0"
+description = "Two-stage 3D lung nodule detection and false-positive reduction (MONAI SwinUNETR) with ONNX Runtime, NVIDIA Triton Inference Server deployment and automated FROC regression tracking."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+authors = [{ name = "Lung Nodule Pipeline Contributors" }]
+keywords = [
+    "lung-nodule-detection",
+    "medical-imaging",
+    "monai",
+    "swinunetr",
+    "onnx",
+    "triton-inference-server",
+    "froc",
+    "luna16",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Scientific/Engineering :: Medical Science Apps.",
+]
+
+dependencies = [
+    "numpy>=1.26,<3",
+    "pandas>=2.1",
+    "scipy>=1.11",
+    "PyYAML>=6.0",
+    "tqdm>=4.66",
+    "SimpleITK>=2.3",
+    "torch>=2.5",
+    "monai>=1.3",
+    "onnx>=1.16",
+    "onnxruntime>=1.18",
+    "tritonclient[grpc]>=2.45",
+]
+
+[project.optional-dependencies]
+dev = ["ruff>=0.6.0", "matplotlib>=3.8"]
+gpu = ["onnxruntime-gpu>=1.18"]
+tensorrt = ["onnxconverter-common>=1.14"]
+
+[project.urls]
+Homepage = "https://github.com/your-org/lung-nodule-triton-eval"
+Issues = "https://github.com/your-org/lung-nodule-triton-eval/issues"
+
+[project.scripts]
+lndet-preprocess = "lung_nodule.data.preprocess:main"
+lndet-train-stage1 = "lung_nodule.training.train_stage1:main"
+lndet-train-stage2 = "lung_nodule.training.train_stage2:main"
+lndet-predict = "lung_nodule.inference.pipeline:main"
+lndet-export-onnx = "lung_nodule.deploy.export_onnx:main"
+lndet-triton-predict = "lung_nodule.deploy.infer_triton:main"
+lndet-eval-froc = "lung_nodule.eval.froc:main"
+lndet-froc-regression = "lung_nodule.eval.regression:main"
+lndet-froc-tracking = "lung_nodule.eval.tracking:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["lung_nodule*"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py310"
+extend-exclude = ["deploy/triton", "artifacts"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "C4", "SIM", "RUF"]
+ignore = [
+    "E501",  # long lines are allowed in docstrings / config dumps
+    "SIM108",  # ternaries are not always clearer
+]
+
+[tool.ruff.lint.per-file-ignores]
+"src/lung_nodule/training/*.py" = ["C901"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
